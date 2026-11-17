@@ -54,7 +54,12 @@ def check(root, home, observe):
             expect(a['ok'] is expected_ok, f'{name}: account state changed incorrectly')
             expect(result['ok'] is (name == 'assigned'), f'{name}: wrong probe result')
             expect(get.call_args.kwargs.get('allow_redirects') is False, 'session must not follow redirects')
-            if name != 'assigned':
+            if name == 'unassigned':
+                expect(a['cookies'].get('hatch_sess') == 'renewed-fixture',
+                       f'{name}: rotated session cookie dropped')
+                expect(all(a[k] == before[k] for k in ('synced_at', 'last_keepalive')),
+                       f'{name}: unconfirmed session marked as synced')
+            elif name != 'assigned':
                 expect(all(a[k] == before[k] for k in protected), f'{name}: modified protected session data')
             else:
                 expect(a['cookies']['hatch_sess'] == 'renewed-fixture', 'renewed cookie not saved')
@@ -134,7 +139,7 @@ def check(root, home, observe):
     
     # 真实测试生产 add_account API 路由返回值中的 essential_missing
     api_res = app.add_account(app.AccountRequest(cookies=invalid_cookies))
-    expect('hatch_sess' in api_res['essential_missing'] and 'hatch_vml' in api_res['essential_missing'], 'API response must report missing essential cookies')
+    expect(api_res['essential_missing'] == ['hatch_sess'], 'API response must report missing essential cookies')
     expect(bool(api_res.get('warning')), 'API response must contain warning string when core tokens missing')
     print('invalid_cookie_check', 'essential_ok', listed_invalid['essential_ok'], 'api_missing', api_res['essential_missing'])
 

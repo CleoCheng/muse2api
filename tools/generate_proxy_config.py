@@ -8,7 +8,7 @@ import urllib.request
 #   $env:MUSE_SUB1_URL = "https://.../subscribe?token=..."
 #   $env:MUSE_SUB2_URL = "https://.../s/..."
 #   $env:MUSE_PROXY_SECRET = "自定义密钥"
-#   python proxy/generate_config.py proxy/config.yaml
+#   python tools/generate_proxy_config.py proxy/config.yaml
 DEFAULT_SUB1 = os.environ.get("MUSE_SUB1_URL", "")
 DEFAULT_SUB2 = os.environ.get("MUSE_SUB2_URL", "")
 DEFAULT_SECRET = os.environ.get("MUSE_PROXY_SECRET", "change-me")
