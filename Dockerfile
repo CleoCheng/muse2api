@@ -12,7 +12,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /app
 
 # 安装 Chromium、中文字体与核心依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true && \
+    apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fonts-wqy-zenhei \
     fonts-freefont-ttf \
@@ -24,13 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # 安装 Python 依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir -r requirements.txt
 
 # 复制代码与必要目录
 COPY admin.html app.py cdp.py config.py engine.py store.py version.json ./
 COPY deploy/ ./deploy/
 COPY extension/ ./extension/
 COPY tools/ ./tools/
+COPY proxy/ ./proxy/
 
 # 创建持久化数据目录
 RUN mkdir -p /app/data/media /app/data/downloads /root/muse2api-profiles

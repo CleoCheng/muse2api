@@ -103,18 +103,78 @@ class Store:
             if _is_pos(ce.get("hatch_vml")):
                 a["expires_at"] = int(ce["hatch_vml"])
         self.tasks: dict[str, dict] = _read(cfg.tasks_file, {})
+        self._rebalance_proxies_if_needed()
+
+    # ---------- 代理出口分配 ----------
+    def allocate_proxy(self, exclude_aid: str | None = None) -> str:
+        """为账号分配代理出口：按配置的 proxy_ports 顺序，寻找当前账号数 < max_accounts_per_proxy 的端口。
+        若全部已达上限，则自动轮转分配到有效账号数最少的端口。"""
+        ports = self.cfg.proxy_ports_list
+        if not ports:
+            return self.cfg.proxy or ""
+        max_per_proxy = self.cfg.max_accounts_per_proxy
+        counts = {p: 0 for p in ports}
+        for a in self.accounts:
+            if exclude_aid and a.get("id") == exclude_aid:
+                continue
+            if a.get("enabled", True):
+                p = a.get("proxy")
+                if p in counts:
+                    counts[p] += 1
+        for p in ports:
+            if counts[p] < max_per_proxy:
+                return p
+        return min(ports, key=lambda p: counts[p])
+
+    def _rebalance_proxies_if_needed(self):
+        ports = self.cfg.proxy_ports_list
+        if not ports:
+            return
+        modified = False
+        with _LOCK:
+            for a in self.accounts:
+                if not a.get("proxy"):
+                    a["proxy"] = self.allocate_proxy(exclude_aid=a.get("id"))
+                    modified = True
+            if modified:
+                _write(self.cfg.accounts_file, self.accounts)
+
+    def get_proxy_stats(self) -> list[dict]:
+        """获取各代理出口的账号分配统计情况。"""
+        ports = self.cfg.proxy_ports_list
+        max_per_proxy = self.cfg.max_accounts_per_proxy
+        counts = {p: 0 for p in ports}
+        assigned_accounts: dict[str, list[dict]] = {p: [] for p in ports}
+        for a in self.accounts:
+            if a.get("enabled", True):
+                p = a.get("proxy")
+                if p in counts:
+                    counts[p] += 1
+                    assigned_accounts[p].append({"id": a.get("id"), "label": a.get("label")})
+        stats = []
+        for p in ports:
+            c = counts[p]
+            stats.append({
+                "proxy": p,
+                "count": c,
+                "max": max_per_proxy,
+                "full": c >= max_per_proxy,
+                "accounts": assigned_accounts[p]
+            })
+        return stats
 
     # ---------- 账号 ----------
     def add_account(self, cookies: dict, label: str = "",
-                    cookies_exp: dict | None = None) -> dict:
+                    cookies_exp: dict | None = None, proxy: str | None = None) -> dict:
         with _LOCK:
             aid = uuid.uuid4().hex[:12]
             exp = {k: int(v) for k, v in (cookies_exp or {}).items()
                    if _is_pos(v)}
             now = int(time.time())
+            assigned_proxy = proxy or self.allocate_proxy()
             acc = {"id": aid, "label": label or aid, "cookies": cookies,
                    "cookies_exp": exp, "expires_at": account_expiry(exp, now),
-                   "expiry_anchor": None,
+                   "expiry_anchor": None, "proxy": assigned_proxy,
                    "enabled": True, "created_at": now,
                    "last_used": None, "last_keepalive": None, "use_count": 0,
                    "ok": None, "note": "", "synced_at": None}
@@ -132,6 +192,7 @@ class Store:
             item["cookie_count"] = len(a.get("cookies", {}))
             item["essential_ok"] = all(
                 a.get("cookies", {}).get(n) for n in ESSENTIAL_COOKIES)
+            item["proxy"] = a.get("proxy", "")
             # 有效期是 hatch_vml 的实测 expires，还是按「2 天寿命」推算的
             item["expires_estimated"] = not _is_pos(ce.get("hatch_vml"))
             out.append(item)

@@ -354,12 +354,19 @@
         </div>
       </div>
       <div class="hint" data-i18n="keepalive-hint">系统已开启<b>后台每 30 分钟静默保活</b>与<b>多账号公平轮转（LRU）</b>；「测试」会真实打开 muse.ai 验证会话。</div>
+      <div id="proxyPoolBar" style="display:none;margin:12px 0;padding:10px 14px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;font-size:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <b>🇺🇸 独立美国代理组出口池（每出口上限 3 账号 · 满额自动轮转）</b>
+          <span id="proxyPoolSummary" class="hint"></span>
+        </div>
+        <div id="proxyGroupsList" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
       <div class="tblwrap"><table>
         <thead><tr>
-          <th>标签</th><th>账号 ID</th><th>状态</th><th>有效期</th><th>额度</th><th data-i18n="col-enabled">启用</th><th>Cookie</th>
+          <th>标签</th><th>账号 ID</th><th>状态</th><th>代理出口</th><th>有效期</th><th>额度</th><th data-i18n="col-enabled">启用</th><th>Cookie</th>
           <th>最后使用</th><th>备注</th><th style="min-width:250px">操作</th>
         </tr></thead>
-        <tbody id="poolBody"><tr><td colspan="10" class="empty">加载中…</td></tr></tbody>
+        <tbody id="poolBody"><tr><td colspan="11" class="empty">加载中…</td></tr></tbody>
       </table></div>
     </div>
   </section>
@@ -1631,8 +1638,25 @@ async function loadPool(){
       bar.style.display = 'none';
     }
 
+    const proxyStats = data.proxy_stats || [];
+    const proxyBar = $('proxyPoolBar');
+    const proxyList = $('proxyGroupsList');
+    if (proxyBar && proxyStats && proxyStats.length) {
+      proxyBar.style.display = '';
+      const totalCapacity = proxyStats.reduce((sum, p) => sum + p.max, 0);
+      const totalUsed = proxyStats.reduce((sum, p) => sum + p.count, 0);
+      $('proxyPoolSummary').innerHTML = `共 ${proxyStats.length} 个独立美国出口，已绑定 ${totalUsed}/${totalCapacity} 账号`;
+      proxyList.innerHTML = proxyStats.map(p => {
+        const port = p.proxy.split(':').pop();
+        const badgeCls = p.full ? 'badge bad' : (p.count > 0 ? 'badge ok' : 'badge mute');
+        return `<span class="${badgeCls}" style="font-size:11px" title="${esc(p.proxy)} · 当前账号数: ${p.count}/${p.max}">端口 :${port} (${p.count}/${p.max})</span>`;
+      }).join('');
+    } else if (proxyBar) {
+      proxyBar.style.display = 'none';
+    }
+
     if (!accounts.length){
-      $('poolBody').innerHTML = '<tr><td colspan="10" class="empty">还没有账号。去「获取 Cookie」页签按三步导入一个</td></tr>';
+      $('poolBody').innerHTML = '<tr><td colspan="11" class="empty">还没有账号。去「获取 Cookie」页签按三步导入一个</td></tr>';
       return;
     }
     $('poolBody').innerHTML = accounts.map(a => {
@@ -1642,10 +1666,13 @@ async function loadPool(){
                   : ok === false ? '<span class="badge bad">● 异常</span>'
                   : '<span class="badge warn">○ 未检测</span>';
       const miss = a.essential_ok ? '' : ' <span class="badge bad" title="缺少核心 cookie，无法生成">缺核心</span>';
+      const portMatch = (a.proxy || '').match(/:(\d+)$/);
+      const pBadge = a.proxy ? `<span class="badge ok" style="font-size:11px" title="${esc(a.proxy)}">🇺🇸 :${portMatch ? portMatch[1] : a.proxy}</span>` : '<span class="badge mute" style="font-size:11px">默认出口</span>';
       return `<tr>
         <td><b>${esc(a.label)}</b></td>
         <td class="mono">${esc(a.id)}</td>
         <td>${badge}${miss}</td>
+        <td>${pBadge}</td>
         <td>${expiryBadge(a)}</td>
         <td>${quotaBadge(a)}</td>
         <td>${a.enabled ? '<span class="badge ok">开</span>' : '<span class="badge mute">关</span>'}</td>
@@ -1665,8 +1692,8 @@ async function loadPool(){
     }).join('');
   }catch(e){
     $('poolBody').innerHTML = authOK === false
-      ? '<tr><td colspan="10" class="empty">🔑 请先在右上角填入 API Key 并点「保存」</td></tr>'
-      : `<tr><td colspan="10" class="empty">加载失败：${esc(e.message)}</td></tr>`;
+      ? '<tr><td colspan="11" class="empty">🔑 请先在右上角填入 API Key 并点「保存」</td></tr>'
+      : `<tr><td colspan="11" class="empty">加载失败：${esc(e.message)}</td></tr>`;
   }
 }
 

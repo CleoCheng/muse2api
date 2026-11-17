@@ -81,6 +81,7 @@ app.add_middleware(CORSMiddleware,
 
 store = Store(CFG)
 engine = MuseEngine(CFG)
+engine.store = store
 
 
 class ConcurrencyLock:
@@ -295,7 +296,7 @@ def _renew_and_persist(acc_id: str, wake_vm: bool = True, force: bool = False) -
         engine._last_http_renew[acc_id] = last_sync
         return acc
     try:
-        res = engine.renew_session_http(acc["cookies"], acc.get("cookies_exp"), wake_vm=wake_vm)
+        res = engine.renew_session_http(acc["cookies"], acc.get("cookies_exp"), wake_vm=wake_vm, proxy=acc.get("proxy"))
         engine._last_http_renew[acc_id] = now
         if res.get("cookies"):
             store.update_account(acc_id, cookies=res["cookies"],
@@ -488,11 +489,13 @@ class AccountRequest(BaseModel):
     cookie_header: str | None = None
     batch: str | None = None          # 多行文本，每行一个账号
     expires: dict[str, int] = Field(default_factory=dict)   # cookie 名 -> 过期时间戳
+    proxy: str | None = None
 
 
 class AccountPatch(BaseModel):
     label: str | None = None
     enabled: bool | None = None
+    proxy: str | None = None
 
 
 # ------------------------- 提示词构造 -------------------------
@@ -1637,6 +1640,7 @@ def admin_status(_=Depends(auth)):
     return {
         "accounts": store.list_accounts(),
         "stats": store.stats(),
+        "proxy_stats": store.get_proxy_stats(),
         "tasks": store.list_tasks(20),
         "media_count": len(os.listdir(CFG.media_dir))
         if os.path.isdir(CFG.media_dir) else 0,
@@ -1646,6 +1650,8 @@ def admin_status(_=Depends(auth)):
         "config": {"site": CFG.site_url, "cdp_port": CFG.cdp_port,
                    "image_timeout": CFG.image_timeout,
                    "video_timeout": CFG.video_timeout,
+                   "proxy": CFG.proxy,
+                   "max_accounts_per_proxy": CFG.max_accounts_per_proxy,
                    "host": CFG.host, "port": CFG.port,
                    "public_base": base},
     }
@@ -1654,7 +1660,7 @@ def admin_status(_=Depends(auth)):
 # ------------------------- 管理：账号池 -------------------------
 @app.get("/admin/accounts")
 def list_accounts(_=Depends(auth)):
-    return {"accounts": store.list_accounts(), "stats": store.stats()}
+    return {"accounts": store.list_accounts(), "stats": store.stats(), "proxy_stats": store.get_proxy_stats()}
 
 
 @app.post("/admin/accounts")
@@ -1664,20 +1670,22 @@ def add_account(req: AccountRequest, _=Depends(auth)):
 
     if req.batch:
         for label, cookies in parse_batch(req.batch):
-            acc = store.add_account(cookies, label)
+            acc = store.add_account(cookies, label, proxy=req.proxy)
             seen.append(cookies)
             added.append({"id": acc["id"], "label": acc["label"],
                           "cookie_count": len(cookies),
+                          "proxy": acc.get("proxy"),
                           "expires_at": acc.get("expires_at")})
 
     cookies = dict(req.cookies)
     if req.cookie_header:
         cookies.update(parse_cookie_text(req.cookie_header))
     if cookies:
-        acc = store.add_account(cookies, req.label, cookies_exp=req.expires)
+        acc = store.add_account(cookies, req.label, cookies_exp=req.expires, proxy=req.proxy)
         seen.append(cookies)
         added.append({"id": acc["id"], "label": acc["label"],
                       "cookie_count": len(cookies),
+                      "proxy": acc.get("proxy"),
                       "expires_at": acc.get("expires_at")})
 
     if not added:
@@ -1694,11 +1702,16 @@ def add_account(req: AccountRequest, _=Depends(auth)):
 
 @app.patch("/admin/accounts/{aid}")
 def patch_account(aid: str, req: AccountPatch, _=Depends(auth)):
-    acc = store.update_account(aid, label=req.label, enabled=req.enabled)
+    acc = store.update_account(aid, label=req.label, enabled=req.enabled, proxy=req.proxy)
     if not acc:
         raise HTTPException(404, "账号不存在")
     return {k: v for k, v in acc.items() if k != "cookies"} | {
         "cookie_count": len(acc.get("cookies", {}))}
+
+
+@app.get("/admin/proxy/stats")
+def get_proxy_stats(_=Depends(auth)):
+    return {"stats": store.get_proxy_stats(), "max_per_proxy": CFG.max_accounts_per_proxy}
 
 
 @app.delete("/admin/accounts/{aid}")
@@ -1812,7 +1825,7 @@ async def query_quota(aid: str, _=Depends(auth)):
     def _probe():
         with GEN_LOCK:
             engine.start()
-            q = engine.quota(acc["cookies"], acc.get("cookies_exp"), account_id=aid)
+            q = engine.quota(acc["cookies"], acc.get("cookies_exp"), account_id=aid, proxy=acc.get("proxy"))
             if not q.get("found"):
                 raise MuseGenerationError("额度面板未读到有效数据；旧缓存未覆盖")
             q["checked_at"] = int(time.time())
@@ -2055,7 +2068,7 @@ def _probe_account_sync(aid: str, check_quota: bool = False) -> dict:
     if not acc or not acc.get("cookies"):
         return {"ok": False, "id": aid, "label": (acc or {}).get("label", aid), "error": "账号无有效 cookie"}
     try:
-        res = engine.renew_session_http(acc["cookies"], acc.get("cookies_exp"), wake_vm=True)
+        res = engine.renew_session_http(acc["cookies"], acc.get("cookies_exp"), wake_vm=True, proxy=acc.get("proxy"))
         store.update_account(
             aid,
             cookies=res["cookies"],
@@ -2070,7 +2083,7 @@ def _probe_account_sync(aid: str, check_quota: bool = False) -> dict:
             try:
                 engine.start()
                 quota = engine.quota(res["cookies"], res["cookies_exp"],
-                                     account_id=aid)
+                                     account_id=aid, proxy=acc.get("proxy"))
                 if not quota.get("found"):
                     raise MuseGenerationError("额度面板未读到有效数据；旧缓存未覆盖")
                 quota["checked_at"] = int(time.time())

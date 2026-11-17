@@ -125,6 +125,17 @@ class Config:
     keepalive_disabled_accounts: bool = field(
         default_factory=lambda: _env("MUSE2API_KEEPALIVE_DISABLED_ACCOUNTS", "0").strip() != "0")
 
+    # 代理与多出口代理池
+    proxy: str = field(default_factory=lambda: _env("MUSE2API_PROXY", ""))
+    proxy_ports: str = field(default_factory=lambda: _env("MUSE2API_PROXY_PORTS", ""))
+    max_accounts_per_proxy: int = field(default_factory=lambda: int(_env("MUSE2API_MAX_ACCOUNTS_PER_PROXY", "3")))
+
+    @property
+    def proxy_ports_list(self) -> list[str]:
+        if not self.proxy_ports:
+            return [self.proxy] if self.proxy else []
+        return [p.strip() for p in self.proxy_ports.split(",") if p.strip()]
+
     @property
     def data_dir(self) -> str:
         return os.path.join(self.base_dir, "data")

@@ -60,3 +60,8 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.tar
+
+# 本地私有配置与运行时产物（含订阅 token / 代理密码，禁止入库）
+服务器配置.txt
+proxy/config.yaml
+*配置.txt

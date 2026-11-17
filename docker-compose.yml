@@ -1,23 +1,49 @@
 version: '3.8'
 
 services:
+  proxy:
+    image: metacubex/mihomo:latest
+    container_name: muse2api-proxy
+    restart: always
+    volumes:
+      - ./proxy/config.yaml:/root/.config/mihomo/config.yaml:ro
+    ports:
+      - "127.0.0.1:7890:7890"
+      - "127.0.0.1:9090:9090"
+    networks:
+      - muse-net
+
   muse2api:
     build: .
     image: muse2api:latest
     container_name: muse2api
     restart: always
+    depends_on:
+      - proxy
     ports:
       - "18610:18610"
     environment:
       # 管理与 API 鉴权 Key（从 .env 或宿主环境读取，留空则自动生成）
       - MUSE2API_KEY=${MUSE2API_KEY:-}
-      # 服务对外基准 URL，如 https://your-domain.com（留空则管理前端自动检测当前域名）
-      - MUSE2API_PUBLIC_BASE=
+      # 服务对外基准 URL，如 https://your-domain.com
+      - MUSE2API_PUBLIC_BASE=${MUSE2API_PUBLIC_BASE:-}
+      # 默认出网代理
+      - MUSE2API_PROXY=http://proxy:7890
+      # 独立美国出口端口池（单出口上限 3 个账号，超额自动轮转）
+      - MUSE2API_PROXY_PORTS=http://proxy:7891,http://proxy:7892,http://proxy:7893,http://proxy:7894,http://proxy:7895,http://proxy:7896,http://proxy:7897,http://proxy:7898,http://proxy:7899,http://proxy:7900,http://proxy:7901,http://proxy:7902,http://proxy:7903,http://proxy:7904,http://proxy:7905,http://proxy:7906
+      - MUSE2API_MAX_ACCOUNTS_PER_PROXY=3
       # 超时配置（秒）
       - MUSE2API_IMAGE_TIMEOUT=240
       - MUSE2API_VIDEO_TIMEOUT=600
       - MUSE2API_CHAT_TIMEOUT=300
+      - MUSE2API_CONCURRENCY=4
     volumes:
       # 持久化账号配置、任务日志及媒体文件
       - ./data:/app/data
     shm_size: '2gb' # 保证 Chromium 渲染多标签页时不因 /dev/shm 耗尽崩溃
+    networks:
+      - muse-net
+
+networks:
+  muse-net:
+    driver: bridge

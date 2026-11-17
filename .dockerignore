@@ -1,0 +1,11 @@
+.git
+.env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+tests
+*.tar.gz
+data/media/*
+data/downloads/*
